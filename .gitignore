@@ -157,3 +157,4 @@ secrets.json
 .env.local
 .env.productionguide-on-ai/
 guide-on-ai/
+chrome_profile/

@@ -1,0 +1,9 @@
+﻿,Variable,Abs_Loading,Abs_Loading,Abs_Loading,Abs_Loading
+,count,mean,min,max,std
+Assigned_Factor,,,,,
+Factor_1,12,0.942,0.825,0.973,0.045
+Factor_2,23,0.599,0.308,0.874,0.161
+Factor_3,6,0.764,0.616,0.966,0.127
+Factor_4,5,0.686,0.539,0.791,0.128
+Factor_5,4,0.6,0.37,0.744,0.166
+Low Loading,4,0.15,0.075,0.235,0.069
