@@ -622,11 +622,11 @@ async def crawl_googlemaps_reviews(store_name: str, target_count: int = 10):
             crawler.driver.quit()
         raise HTTPException(status_code=500, detail=f"크롤링 오류: {str(e)}")
 
-@app.get("/sentimental-analysis-result", response_model=SentimentAnalysisResponse)
-async def get_sentimental_analysis_result():
-    """감정 분석 결과 조회 API"""
+@app.get("/sentimental-analysis-result/{session_id}", response_model=SentimentAnalysisResponse)
+async def get_sentimental_analysis_result(session_id: int):
+    """감정 분석 결과를 계산하고 store_summary 테이블에 저장하는 API"""
     try:
-        # sentimental_analysis.py 실행하여 positive_ratio 얻기
+        # sentimental_analysis.py 실행하여 positive_ratio와 rating_average 얻기
         result = subprocess.run(
             ["python", "/Users/ahnsaeyeon/guide-on/ai/temp/sentimental_analysis.py"],
             capture_output=True,
@@ -637,17 +637,39 @@ async def get_sentimental_analysis_result():
         if result.returncode != 0:
             raise HTTPException(status_code=500, detail=f"감정 분석 실행 오류: {result.stderr}")
         
-        # JSON 출력에서 positive_ratio 값 추출
+        # JSON 출력에서 positive_ratio와 rating_average 값 추출
         output_lines = result.stdout.strip().split('\n')
         json_line = output_lines[-1]  # 마지막 줄이 JSON 결과
         
         try:
             result_data = json.loads(json_line)
-            positive_ratio = result_data["positive_ratio"]
+            positive_ratio = result_data["positive_ratio"] * 100
+            rating_average = result_data["rating_average"]
         except (json.JSONDecodeError, KeyError) as e:
             raise HTTPException(status_code=500, detail=f"결과 파싱 오류: {str(e)}")
         
-        return SentimentAnalysisResponse(positive_ratio=positive_ratio * 100)
+        # store_summary 테이블에 데이터 저장
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            
+            # store_summary 테이블에 customer_review_positive_ratio와 customer_review_avg_rating 저장
+            update_query = """
+            UPDATE store_summary 
+            SET customer_review_positive_ratio = %s, customer_review_avg_rating = %s
+            WHERE session_id = %s
+            """
+            cursor.execute(update_query, (positive_ratio, rating_average, session_id))
+            conn.commit()
+            
+            cursor.close()
+            conn.close()
+            
+        except Exception as db_error:
+            print(f"DB 저장 오류: {db_error}")
+            # DB 저장 실패해도 API 응답은 정상 반환
+        
+        return SentimentAnalysisResponse(positive_ratio=positive_ratio)
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"감정 분석 오류: {str(e)}")
