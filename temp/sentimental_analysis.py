@@ -48,9 +48,39 @@ def get_reviews_from_db():
             "만두가 아주 맛있어서 만족스럽다."
         ]
 
+# 3️⃣ DB에서 rating 평균 구하기
+def get_rating_average():
+    """MySQL DB에서 googlemaps_reviews의 rating 컬럼 평균을 구함"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        query = "SELECT AVG(rating) FROM googlemaps_reviews WHERE rating IS NOT NULL"
+        cursor.execute(query)
+        result = cursor.fetchone()
+        
+        cursor.close()
+        conn.close()
+        
+        if result and result[0] is not None:
+            return round(float(result[0]), 2)
+        else:
+            return None
+            
+    except Exception as e:
+        print(f"DB 연결 오류: {e}")
+        return None
+
 # DB에서 리뷰 데이터 가져오기
 reviews = get_reviews_from_db()
 print(f"DB에서 {len(reviews)}개의 리뷰를 가져왔습니다.")
+
+# DB에서 rating 평균 구하기
+rating_avg = get_rating_average()
+if rating_avg is not None:
+    print(f"DB의 평균 별점: {rating_avg}점")
+else:
+    print("평균 별점을 구할 수 없습니다.")
 
 
 
@@ -100,8 +130,12 @@ for review, pred, prob in zip(reviews, predictions, probs):
 
 print(f"전체 리뷰 중 긍정 비중: {positive_ratio:.2f}")
 
-# API에서 사용할 수 있도록 positive_ratio 값만 출력
+# API에서 사용할 수 있도록 positive_ratio와 rating_avg 값 출력
 if __name__ == "__main__":
     import json
-    print(json.dumps({"positive_ratio": positive_ratio}))
+    result = {
+        "positive_ratio": positive_ratio,
+        "rating_average": rating_avg
+    }
+    print(json.dumps(result))
     

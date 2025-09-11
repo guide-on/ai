@@ -39,6 +39,7 @@ class GoogleMapsCrawler(BaseCrawler):
             options = Options()
             options.add_argument('--disable-gpu')
             options.add_argument('--no-sandbox')
+            options.add_argument('--headless')
             options.add_experimental_option("detach", True)
             self.driver = webdriver.Chrome(options=options)
             self.logger.info("브라우저가 성공적으로 시작되었습니다.")
