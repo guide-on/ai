@@ -435,71 +435,71 @@ def get_store_data_from_db(store_id):
 async def root():
     return {"message": "신용점수 계산 API (테이블별 점수 포함)"}
 
-@app.post("/hybrid-credit-score-result", response_model=CreditScoreResponse)
-async def calculate_credit_score(request: CreditScoreRequest):
-    """기존 API 유지 (하위 호환성)"""
-    try:
-        # DB 연결
-        conn = get_db_connection()
-        cursor = conn.cursor(pymysql.cursors.DictCursor)
+# @app.post("/hybrid-credit-score-result", response_model=CreditScoreResponse)
+# async def calculate_credit_score(request: CreditScoreRequest):
+#     """기존 API 유지 (하위 호환성)"""
+#     try:
+#         # DB 연결
+#         conn = get_db_connection()
+#         cursor = conn.cursor(pymysql.cursors.DictCursor)
         
-        # 데이터 조회
-        query = """
-        SELECT * FROM store_unified_summary 
-        WHERE store_id = %s AND summary_year_month = %s
-        """
-        cursor.execute(query, (request.store_id, request.summary_year_month))
-        row = cursor.fetchone()
+#         # 데이터 조회
+#         query = """
+#         SELECT * FROM store_unified_summary 
+#         WHERE store_id = %s AND summary_year_month = %s
+#         """
+#         cursor.execute(query, (request.store_id, request.summary_year_month))
+#         row = cursor.fetchone()
         
-        if not row:
-            raise HTTPException(
-                status_code=404, 
-                detail=f"Store ID {request.store_id}의 {request.summary_year_month} 데이터를 찾을 수 없습니다."
-            )
+#         if not row:
+#             raise HTTPException(
+#                 status_code=404, 
+#                 detail=f"Store ID {request.store_id}의 {request.summary_year_month} 데이터를 찾을 수 없습니다."
+#             )
         
-        # 데이터 정리 및 신용점수 계산
-        cleaned_row = scorer.clean_db_row(row)
-        result = scorer.calculate_single_score(cleaned_row)
+#         # 데이터 정리 및 신용점수 계산
+#         cleaned_row = scorer.clean_db_row(row)
+#         result = scorer.calculate_single_score(cleaned_row)
         
-        # DB 연결 종료
-        cursor.close()
-        conn.close()
+#         # DB 연결 종료
+#         cursor.close()
+#         conn.close()
         
-        return CreditScoreResponse(**result)
+#         return CreditScoreResponse(**result)
         
-    except pymysql.Error as e:
-        raise HTTPException(status_code=500, detail=f"데이터베이스 오류: {str(e)}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"계산 오류: {str(e)}")
+#     except pymysql.Error as e:
+#         raise HTTPException(status_code=500, detail=f"데이터베이스 오류: {str(e)}")
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=f"계산 오류: {str(e)}")
 
-@app.get("/hybrid-credit-score-result/{store_id}")
-async def get_credit_score(store_id: int, summary_year_month: str = "2025-08"):
-    """GET 방식으로도 조회 가능 (기존 API 유지)"""
-    request = CreditScoreRequest(store_id=store_id, summary_year_month=summary_year_month)
-    return await calculate_credit_score(request)
+# @app.get("/hybrid-credit-score-result/{store_id}")
+# async def get_credit_score(store_id: int, summary_year_month: str = "2025-08"):
+#     """GET 방식으로도 조회 가능 (기존 API 유지)"""
+#     request = CreditScoreRequest(store_id=store_id, summary_year_month=summary_year_month)
+#     return await calculate_credit_score(request)
 
-@app.get("/hybrid-credit-score/{store_id}")
-async def get_hybrid_credit_score(store_id: int):
+@app.post("/hybrid-credit-score/{session_id}")
+async def save_hybrid_credit_score(session_id: int):
     """
-    특정 상점의 신용점수를 계산하는 API 엔드포인트 (FA 기반, 간소화된 버전)
+    신용점수를 계산하고 member_credit 테이블에 저장하는 API
     
     Args:
-        store_id (int): 상점 ID (path variable)
+        session_id (int): 세션 ID (path variable)
     
     Returns:
-        dict: 필요한 신용점수 결과만 반환
+        dict: 저장 완료 메시지
     """
     try:
         # 1. 데이터베이스에서 데이터 조회
-        store_data = get_store_data_from_db(store_id)
+        store_data = get_store_data_from_db(session_id)
         
         if store_data is None or store_data.empty:
             raise HTTPException(
                 status_code=404, 
-                detail=f"Store ID {store_id}에 해당하는 데이터를 찾을 수 없습니다."
+                detail=f"Session ID {session_id}에 해당하는 데이터를 찾을 수 없습니다."
             )
         
-        # 2. 신용점수 계산 (FA_score.py의 result_df 사용)
+        # 2. 신용점수 계산 (FA_score.py의 result_df 사용)   
         result_df = fa_get_credit_score(store_data)
         
         if result_df is None or result_df.empty:
@@ -512,19 +512,29 @@ async def get_hybrid_credit_score(store_id: int):
         result_row = result_df.iloc[0]
         credit_score = int(result_row['credit_score'])
         
-        # 4. member_credit 테이블의 hybrid_credit_score에 저장
+        # 4. member_credit 테이블에 모든 점수 저장
         try:
             conn = get_db_connection()
             cursor = conn.cursor()
             
-            # member_credit 테이블에 hybrid_credit_score 저장 (INSERT 또는 UPDATE)
+            # member_credit 테이블에 모든 점수 저장 (UPDATE)
             save_query = """
-            INSERT INTO member_credit (session_id, hybrid_credit_score) 
-            VALUES (%s, %s)
-            ON DUPLICATE KEY UPDATE 
-            hybrid_credit_score = VALUES(hybrid_credit_score)
+            UPDATE member_credit
+            SET
+                hybrid_credit_score = %s,
+                sales_summary_score_scaled = %s,
+                financial_info_score_scaled = %s,
+                operational_info_score_scaled = %s
+            WHERE
+                session_id = %s;
             """
-            cursor.execute(save_query, (store_id, credit_score))
+            cursor.execute(save_query, (
+                credit_score, 
+                int(result_row['sales_summary_score_scaled']),
+                int(result_row['financial_info_score_scaled']),
+                int(result_row['operational_info_score_scaled']),
+                session_id
+            ))
             conn.commit()
             
             cursor.close()
@@ -532,16 +542,62 @@ async def get_hybrid_credit_score(store_id: int):
             
         except Exception as db_error:
             print(f"DB 저장 오류: {db_error}")
-            # DB 저장 실패해도 API 응답은 정상 반환
+            raise HTTPException(status_code=500, detail=f"데이터베이스 저장 오류: {str(db_error)}")
         
         # 5. API 응답 반환
         return {
-            "session_id": int(result_row['store_id']),
-            "credit_score": credit_score,
-            "sales_summary_score_scaled": int(result_row['sales_summary_score_scaled']),
-            "financial_info_score_scaled": int(result_row['financial_info_score_scaled']),
-            "operational_info_score_scaled": int(result_row['operational_info_score_scaled']),
-            "message": "FA 기반 신용점수 계산이 성공적으로 완료되었습니다."
+            "message": "신용점수 계산 및 저장이 성공적으로 완료되었습니다.",
+            "session_id": session_id
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"서버 오류가 발생했습니다: {(e)}"
+        )
+
+@app.get("/hybrid-credit-score/result/{session_id}")
+async def get_hybrid_credit_score_result(session_id: int):
+    """
+    member_credit 테이블에서 해당 session_id의 신용점수 정보를 조회하는 API
+    
+    Args:
+        session_id (int): 세션 ID (path variable)
+    
+    Returns:
+        dict: 신용점수 정보
+    """
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(pymysql.cursors.DictCursor)
+        
+        # member_credit 테이블에서 해당 session_id의 데이터 조회
+        query = """
+        SELECT hybrid_credit_score, sales_summary_score_scaled, 
+               financial_info_score_scaled, operational_info_score_scaled
+        FROM member_credit 
+        WHERE session_id = %s
+        """
+        cursor.execute(query, (session_id,))
+        result = cursor.fetchone()
+        
+        cursor.close()
+        conn.close()
+        
+        if not result:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Session ID {session_id}에 해당하는 데이터를 찾을 수 없습니다."
+            )
+        
+        return {
+            "session_id": session_id,
+            "hybrid_credit_score": result['hybrid_credit_score'],
+            "sales_summary_score_scaled": result['sales_summary_score_scaled'],
+            "financial_info_score_scaled": result['financial_info_score_scaled'],
+            "operational_info_score_scaled": result['operational_info_score_scaled']
         }
         
     except HTTPException:
