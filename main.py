@@ -622,7 +622,7 @@ async def crawl_googlemaps_reviews(store_name: str, target_count: int = 10):
             crawler.driver.quit()
         raise HTTPException(status_code=500, detail=f"크롤링 오류: {str(e)}")
 
-@app.get("/sentimental-analysis-result/{session_id}", response_model=SentimentAnalysisResponse)
+@app.post("/sentimental-analysis-result/{session_id}", response_model=SentimentAnalysisResponse)
 async def get_sentimental_analysis_result(session_id: int):
     """감정 분석 결과를 계산하고 store_summary 테이블에 저장하는 API"""
     try:
